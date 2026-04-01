@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- 
+        Originally created by Dave Theurer
+        Vibe coded by 220 and Google's Gemini 
+    -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Retro City Defender - CRT Edition</title>
+    <style>
+        :root {
+            --retro-green: #00ff41;
+            --retro-dark: #0a0a0a;
+            --retro-red: #ff4444;
+        }
+        body { 
+            margin: 0; 
+            background: #000; 
+            color: var(--retro-green); 
+            font-family: 'Courier New', Courier, monospace; 
+            overflow: hidden; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            height: 100vh;
+            user-select: none;
+        }
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 50px rgba(0, 255, 65, 0.2);
+            border: 4px solid #333;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        canvas { 
+            background: var(--retro-dark); 
+            display: block;
+        }
+        /* CRT Overlay */
+        .crt::before {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0; left: 0; bottom: 0; right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), 
+                        linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            z-index: 2;
+            background-size: 100% 4px, 3px 100%;
+            pointer-events: none;
+        }
+        .crt::after {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0; left: 0; bottom: 0; right: 0;
+            background: rgba(18, 16, 16, 0.1);
+            opacity: 0;
+            z-index: 2;
+            pointer-events: none;
+            animation: flicker 0.15s infinite;
+        }
+        @keyframes flicker {
+            0% { opacity: 0.27861; }
+            5% { opacity: 0.34769; }
+            10% { opacity: 0.23604; }
+            100% { opacity: 0.25; }
+        }
+        #ui-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            pointer-events: none;
+            z-index: 10;
+        }
+        .message-box {
+            background: rgba(0, 0, 0, 0.85);
+            border: 2px solid var(--retro-green);
+            padding: 20px;
+            text-align: center;
+            display: none;
+        }
+        .active { display: block; }
+        h1 { margin: 0 0 10px 0; font-size: 2.5rem; text-shadow: 0 0 10px var(--retro-green); }
+        p { margin: 5px 0; }
+        .stats {
+            position: absolute;
+            top: 10px; width: 100%;
+            display: flex; justify-content: space-around;
+            font-size: 1rem; pointer-events: none;
+            text-shadow: 0 0 5px var(--retro-green);
+        }
+        .threat-telemetry {
+            position: absolute;
+            top: 40px; width: 100%;
+            display: flex; justify-content: center;
+            gap: 20px;
+            font-size: 0.8rem; pointer-events: none;
+            opacity: 0.8;
+        }
+        .impacted { color: var(--retro-red); }
+        .taken { color: yellow; }
+        .attribution {
+            margin-top: 30px;
+            font-size: 0.6rem;
+            opacity: 0.6;
+            line-height: 1.4;
+            border-top: 1px solid rgba(0, 255, 65, 0.2);
+            padding-top: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container" class="crt">
+        <div class="stats">
+            <div id="round-display">ROUND: 1</div>
+            <div id="missile-display">MISSILES: 10</div>
+            <div id="score-display">SCORE: 0</div>
+        </div>
+        <div class="threat-telemetry">
+            <div>TOTAL THREATS: <span id="threats-total">0</span></div>
+            <div class="taken">KILLS: <span id="threats-taken">0</span></div>
+            <div class="impacted">IMPACTED: <span id="threats-impacted">0</span></div>
+        </div>
+        <div id="ui-overlay">
+            <div id="start-msg" class="message-box active">
+                <h1>CITY DEFENDER</h1>
+                <p>PROTECT THE REMAINING CITIES</p>
+                <div style="margin: 20px 0; text-align: left; font-size: 0.9rem; border-top: 1px solid #0f0; padding-top: 10px;">
+                    <p style="color: yellow;">50MM CANNON [LMB]: High Velocity AP Rounds</p>
+                    <p style="color: cyan;">HOMING MISSILES [RMB]: Area Suppression</p>
+                </div>
+                <p style="margin-top: 20px; font-size: 0.8rem;">CLICK TO BEGIN</p>
+                <div class="attribution">
+                    Originally created by Dave Theurer<br>
+                    Vibe coded by 220 and Google's Gemini
+                </div>
+            </div>
+            <div id="intermission-msg" class="message-box">
+                <h1>ROUND CLEAR</h1>
+                <p id="repair-text">REINFORCEMENTS ARRIVED</p>
+                <p>MISSILES REPLENISHED & CITIES REPAIRED</p>
+                <p style="margin-top: 20px;">CLICK FOR NEXT WAVE</p>
+            </div>
+            <div id="gameover-msg" class="message-box">
+                <h1 style="color: red;">EXTINCTION</h1>
+                <p id="final-score">FINAL SCORE: 0</p>
+                <p style="margin-top: 20px;">CLICK TO RESTART</p>
+            </div>
+        </div>
+        <canvas id="gameCanvas"></canvas>
+    </div>
+
+<script>
+/**
+ * Originally created by Dave Theurer
+ * Vibe coded by 220 and Google's Gemini
+ */
+
+/**
+ * AUDIO ENGINE
+ */
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+function playSound(type) {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    const now = audioCtx.currentTime;
+
+    if (type === 'cannon') {
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(180, now);
+        osc.frequency.exponentialRampToValueAtTime(60, now + 0.08);
+        gain.gain.setValueAtTime(0.08, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+        osc.start();
+        osc.stop(now + 0.08);
+    } else if (type === 'homing') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(300, now);
+        osc.frequency.linearRampToValueAtTime(900, now + 0.15);
+        gain.gain.setValueAtTime(0.04, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+        osc.start();
+        osc.stop(now + 0.15);
+    } else if (type === 'empty') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(100, now);
+        gain.gain.setValueAtTime(0.05, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+        osc.start();
+        osc.stop(now + 0.05);
+    } else if (type === 'explosion') {
+        const noiseBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.25, audioCtx.sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < audioCtx.sampleRate * 0.25; i++) output[i] = Math.random() * 2 - 1;
+        const noise = audioCtx.createBufferSource();
+        noise.buffer = noiseBuffer;
+        const noiseFilter = audioCtx.createBiquadFilter();
+        noiseFilter.type = 'lowpass';
+        noiseFilter.frequency.setValueAtTime(800, now);
+        noiseFilter.frequency.exponentialRampToValueAtTime(30, now + 0.25);
+        const noiseGain = audioCtx.createGain();
+        noiseGain.gain.setValueAtTime(0.15, now);
+        noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+        noise.connect(noiseFilter);
+        noiseFilter.connect(noiseGain);
+        noiseGain.connect(audioCtx.destination);
+        noise.start();
+    } else if (type === 'hit') {
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(250, now);
+        osc.frequency.linearRampToValueAtTime(100, now + 0.05);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+        osc.start();
+        osc.stop(now + 0.05);
+    } else if (type === 'city_hit') {
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(80, now);
+        osc.frequency.linearRampToValueAtTime(1, now + 0.4);
+        gain.gain.setValueAtTime(0.2, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+        osc.start();
+        osc.stop(now + 0.4);
+    }
+}
+
+/**
+ * GAME CORE
+ */
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+canvas.width = 800;
+canvas.height = 600;
+
+let gameState = 'START'; 
+let round = 1;
+let score = 0;
+let missileCount = 10;
+const MAX_MISSILES = 10;
+let threatsTotal = 0;
+let threatsTaken = 0;
+let threatsImpacted = 0;
+
+let cities = [];
+let enemies = [];
+let playerProjectiles = [];
+let explosions = [];
+let mouse = { x: 400, y: 300, down: false };
+let cannonCooldown = 0;
+
+class City {
+    constructor(x, y) {
+        this.x = x; this.y = y;
+        this.w = 40; this.maxHp = 100;
+        this.hp = 100; this.destroyed = false;
+    }
+    draw() {
+        if (this.destroyed) {
+            ctx.fillStyle = '#222';
+            ctx.fillRect(this.x - this.w/2, this.y - 10, this.w, 10);
+            return;
+        }
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = '#00ff41';
+        ctx.fillStyle = '#008822';
+        ctx.fillRect(this.x - 15, this.y - 20, 8, 20);
+        ctx.fillRect(this.x - 3, this.y - 28, 10, 28);
+        ctx.fillRect(this.x + 10, this.y - 15, 8, 15);
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = '#440000';
+        ctx.fillRect(this.x - 20, this.y + 5, 40, 4);
+        ctx.fillStyle = '#00ff41';
+        ctx.fillRect(this.x - 20, this.y + 5, (this.hp/this.maxHp) * 40, 4);
+    }
+    takeDamage(amt) {
+        if (this.destroyed) return;
+        this.hp -= amt;
+        playSound('city_hit');
+        if (this.hp <= 0) {
+            this.hp = 0; this.destroyed = true;
+            createExplosion(this.x, this.y, 60, '#ff4400');
+        }
+    }
+    repair() {
+        if (!this.destroyed && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + 40);
+    }
+}
+
+class Cannon {
+    constructor() {
+        this.x = 400; this.y = 580; this.barrelLength = 35;
+    }
+    draw() {
+        const angle = Math.atan2(mouse.y - this.y, mouse.x - this.x);
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.shadowBlur = 15; ctx.shadowColor = '#00ff41';
+        ctx.fillStyle = '#1a1a1a'; ctx.strokeStyle = '#00ff41'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(0, 0, 30, Math.PI, 0); ctx.fill(); ctx.stroke();
+        ctx.rotate(angle);
+        ctx.fillStyle = '#333'; ctx.fillRect(0, -5, this.barrelLength, 10);
+        ctx.strokeStyle = '#00ff41'; ctx.strokeRect(0, -5, this.barrelLength, 10);
+        ctx.restore();
+    }
+    getLaunchPos() {
+        const angle = Math.atan2(mouse.y - this.y, mouse.x - this.x);
+        return {
+            x: this.x + Math.cos(angle) * this.barrelLength,
+            y: this.y + Math.sin(angle) * this.barrelLength
+        };
+    }
+}
+
+const mainCannon = new Cannon();
+
+function initCities() {
+    cities = [];
+    const spacing = 60;
+    for (let i = 0; i < 5; i++) cities.push(new City(40 + i * spacing, 560));
+    for (let i = 0; i < 5; i++) cities.push(new City(520 + i * spacing, 560));
+}
+
+function createExplosion(x, y, maxR, color = '#ffffff', silent = false) {
+    explosions.push({ x, y, r: 0, maxR, color });
+    if (!silent) playSound('explosion');
+}
+
+/**
+ * ENEMIES
+ */
+class Enemy {
+    constructor(type) {
+        this.type = type;
+        this.active = true;
+        if (type === 'missile') {
+            this.x = Math.random() * canvas.width; this.y = -20;
+            const target = cities[Math.floor(Math.random() * cities.length)];
+            this.tx = target.x; this.ty = target.y; this.targetCity = target;
+            this.speed = 1.0 + (round * 0.2); this.color = '#fff'; this.hp = 5; 
+        } else if (type === 'plane') {
+            this.direction = Math.random() > 0.5 ? 1 : -1;
+            this.x = this.direction === 1 ? -50 : canvas.width + 50;
+            this.y = 50 + Math.random() * 100;
+            this.speed = 1.8 + (round * 0.15); this.color = '#ff00ff'; this.hp = 4;
+            this.bombTimer = 40 + Math.random() * 80;
+        } else if (type === 'drone') {
+            this.x = Math.random() * canvas.width; this.y = -20;
+            this.vx = (Math.random() - 0.5) * 6; this.vy = 1.0 + Math.random() * 1.2;
+            this.color = '#ffff00'; this.hp = 2;
+        } else if (type === 'bomb') {
+            this.speed = 2.8 + (round * 0.3); this.color = '#ff4444'; this.hp = 1;
+        }
+    }
+    update() {
+        if (this.type === 'missile' || this.type === 'bomb') {
+            const angle = Math.atan2(this.ty - this.y, this.tx - this.x);
+            this.x += Math.cos(angle) * this.speed; this.y += Math.sin(angle) * this.speed;
+            if (this.y >= this.ty) {
+                this.targetCity.takeDamage(this.type === 'bomb' ? 50 : 34);
+                this.active = false; threatsImpacted++;
+            }
+        } else if (this.type === 'plane') {
+            this.x += this.direction * this.speed;
+            this.bombTimer--;
+            if (this.bombTimer <= 0) {
+                const b = new Enemy('bomb'); b.x = this.x; b.y = this.y;
+                const target = cities[Math.floor(Math.random() * cities.length)];
+                b.tx = target.x; b.ty = target.y; b.targetCity = target;
+                enemies.push(b); threatsTotal++;
+                this.bombTimer = 80 + Math.random() * 120;
+            }
+            if (this.x < -100 || this.x > canvas.width + 100) {
+                this.active = false;
+                threatsTotal--; 
+            }
+        } else if (this.type === 'drone') {
+            if (Math.random() < 0.02) this.vx += (Math.random() - 0.5) * 4;
+            this.x += this.vx; this.y += this.vy;
+            if (this.y > 550) {
+                const nearest = cities.reduce((prev, curr) => Math.abs(curr.x - this.x) < Math.abs(prev.x - this.x) ? curr : prev);
+                nearest.takeDamage(20); this.active = false; threatsImpacted++;
+            }
+            if (this.x < 0 || this.x > canvas.width) this.vx *= -1;
+        }
+    }
+    draw() {
+        ctx.shadowBlur = 5; ctx.shadowColor = this.color; ctx.fillStyle = this.color;
+        if (this.type === 'missile') {
+            ctx.beginPath(); ctx.moveTo(this.x, this.y); ctx.lineTo(this.x - (this.tx-this.x)*0.02, this.y - (this.ty-this.y)*0.02);
+            ctx.strokeStyle = '#666'; ctx.stroke(); ctx.fillRect(this.x-2, this.y-2, 4, 4);
+        } else if (this.type === 'plane') {
+            ctx.fillRect(this.x-15, this.y-5, 30, 10); ctx.fillRect(this.x-5, this.y-10, 10, 20);
+        } else if (this.type === 'drone') {
+            ctx.beginPath(); ctx.moveTo(this.x, this.y - 8); ctx.lineTo(this.x + 8, this.y + 8); ctx.lineTo(this.x - 8, this.y + 8); ctx.fill();
+        } else if (this.type === 'bomb') {
+            ctx.beginPath(); ctx.arc(this.x, this.y, 4, 0, Math.PI*2); ctx.fill();
+        }
+        ctx.shadowBlur = 0;
+    }
+}
+
+/**
+ * PLAYER WEAPONS
+ */
+class Projectile {
+    constructor(type, tx, ty) {
+        this.type = type;
+        const launch = mainCannon.getLaunchPos();
+        this.x = launch.x; this.y = launch.y; this.tx = tx; this.ty = ty;
+        this.active = true; this.speed = type === '50mm' ? 24 : 8;
+        if (type === '50mm') {
+            const angle = Math.atan2(ty - this.y, tx - this.x);
+            this.vx = Math.cos(angle) * this.speed; this.vy = Math.sin(angle) * this.speed;
+        } else {
+            this.target = this.findTarget(); this.life = 220;
+        }
+    }
+    findTarget() {
+        if (enemies.length === 0) return null;
+        return enemies.reduce((prev, curr) => {
+            const dP = Math.hypot(prev.x - this.tx, prev.y - this.ty);
+            const dC = Math.hypot(curr.x - this.tx, curr.y - this.ty);
+            return dC < dP ? curr : prev;
+        });
+    }
+    applySplashDamage(x, y, radius) {
+        enemies.forEach(e => {
+            if (e.active && Math.hypot(e.x - x, e.y - y) < radius) {
+                e.hp = 0; e.active = false; threatsTaken++;
+                score += (e.type === 'drone' ? 150 : 100);
+                createExplosion(e.x, e.y, 30, e.color, true);
+            }
+        });
+    }
+    update() {
+        if (this.type === '50mm') {
+            this.x += this.vx; this.y += this.vy;
+            if (this.x < -100 || this.x > canvas.width + 100 || this.y < -100) this.active = false;
+            enemies.forEach(e => {
+                if (e.active && Math.hypot(this.x - e.x, this.y - e.y) < 20) {
+                    e.hp -= 1; this.active = false;
+                    if (e.hp <= 0) {
+                        e.active = false; threatsTaken++;
+                        score += (e.type === 'drone' ? 150 : 100);
+                        createExplosion(e.x, e.y, 35, e.color);
+                    } else {
+                        createExplosion(this.x, this.y, 10, '#ffffff', true); playSound('hit');
+                    }
+                }
+            });
+        } else {
+            this.life--;
+            if (this.life <= 0) {
+                createExplosion(this.x, this.y, 60, '#00ffff');
+                this.applySplashDamage(this.x, this.y, 60); this.active = false; return;
+            }
+            if (!this.target || !this.target.active) this.target = this.findTarget();
+            if (this.target) {
+                const angle = Math.atan2(this.target.y - this.y, this.target.x - this.x);
+                this.x += Math.cos(angle) * this.speed; this.y += Math.sin(angle) * this.speed;
+            } else this.y -= this.speed;
+            enemies.forEach(e => {
+                if (e.active && Math.hypot(this.x - e.x, this.y - e.y) < 20) {
+                    createExplosion(this.x, this.y, 80, '#00ffff');
+                    this.applySplashDamage(this.x, this.y, 80); this.active = false;
+                }
+            });
+            if (this.y < -50) this.active = false;
+        }
+    }
+    draw() {
+        ctx.fillStyle = this.type === '50mm' ? '#ffff00' : '#00ffff';
+        ctx.beginPath(); ctx.arc(this.x, this.y, this.type === '50mm' ? 2 : 4, 0, Math.PI*2); ctx.fill();
+        if (this.type === 'homing') {
+            ctx.strokeStyle = `rgba(0, 255, 255, ${this.life/220})`;
+            ctx.beginPath(); ctx.moveTo(this.x, this.y); ctx.lineTo(this.x, this.y + 10); ctx.stroke();
+        }
+    }
+}
+
+/**
+ * GAME LOOP
+ */
+function spawnWave() {
+    let count = 0; 
+    const maxSpawned = 12 + (round * 5);
+    threatsTotal = maxSpawned; threatsTaken = 0; threatsImpacted = 0;
+    const interval = setInterval(() => {
+        if (gameState !== 'PLAYING') { clearInterval(interval); return; }
+        const rand = Math.random();
+        if (rand < 0.45) enemies.push(new Enemy('missile'));
+        else if (rand < 0.75) enemies.push(new Enemy('drone'));
+        else enemies.push(new Enemy('plane'));
+        count++;
+        if (count >= maxSpawned) { clearInterval(interval); checkEndWave(); }
+    }, Math.max(250, 900 - (round * 70)));
+}
+
+function checkEndWave() {
+    const check = setInterval(() => {
+        if (enemies.length === 0 && gameState === 'PLAYING') {
+            clearInterval(check);
+            if (cities.every(c => c.destroyed)) endGame(); else intermission();
+        }
+    }, 1000);
+}
+
+function intermission() {
+    gameState = 'INTERMISSION';
+    document.getElementById('intermission-msg').classList.add('active');
+    cities.forEach(c => c.repair());
+    round++; 
+}
+
+function endGame() {
+    gameState = 'GAMEOVER';
+    document.getElementById('gameover-msg').classList.add('active');
+    document.getElementById('final-score').innerText = `FINAL SCORE: ${score}`;
+}
+
+function startRound() {
+    document.querySelectorAll('.message-box').forEach(el => el.classList.remove('active'));
+    gameState = 'PLAYING';
+    enemies = []; playerProjectiles = []; 
+    missileCount = MAX_MISSILES;
+    spawnWave();
+}
+
+canvas.addEventListener('mousedown', e => {
+    if (gameState === 'START') { 
+        initCities(); startRound(); return; 
+    }
+    if (gameState === 'INTERMISSION') { 
+        startRound(); return; 
+    }
+    if (gameState === 'GAMEOVER') {
+        round = 1; score = 0; initCities(); startRound(); return;
+    }
+    
+    if (e.button === 0) mouse.down = true;
+    if (e.button === 2) {
+        if (missileCount > 0) {
+            playerProjectiles.push(new Projectile('homing', mouse.x, mouse.y));
+            playSound('homing');
+            missileCount--;
+        } else playSound('empty');
+    }
+});
+
+window.addEventListener('mouseup', e => { if (e.button === 0) mouse.down = false; });
+canvas.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    mouse.x = e.clientX - rect.left;
+    mouse.y = e.clientY - rect.top;
+});
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+function update() {
+    document.getElementById('score-display').innerText = `SCORE: ${score}`;
+    document.getElementById('round-display').innerText = `ROUND: ${round}`;
+    document.getElementById('missile-display').innerText = `MISSILES: ${missileCount}`;
+    document.getElementById('threats-total').innerText = threatsTotal;
+    document.getElementById('threats-taken').innerText = threatsTaken;
+    document.getElementById('threats-impacted').innerText = threatsImpacted;
+
+    if (gameState === 'PLAYING') {
+        if (mouse.down && cannonCooldown <= 0) {
+            playerProjectiles.push(new Projectile('50mm', mouse.x, mouse.y));
+            playSound('cannon'); cannonCooldown = 4;
+        }
+        if (cannonCooldown > 0) cannonCooldown--;
+    }
+
+    if (gameState === 'PLAYING' || (gameState === 'INTERMISSION' && enemies.length > 0)) {
+        enemies.forEach((e, i) => { e.update(); if (!e.active) enemies.splice(i, 1); });
+        playerProjectiles.forEach((p, i) => { p.update(); if (!p.active) playerProjectiles.splice(i, 1); });
+    }
+
+    explosions.forEach((ex, i) => {
+        ex.r += 2.5;
+        if (ex.r > ex.maxR) explosions.splice(i, 1);
+    });
+}
+
+function draw() {
+    ctx.fillStyle = '#050505'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#111'; ctx.fillRect(0, 560, canvas.width, 40);
+
+    cities.forEach(c => c.draw());
+    mainCannon.draw();
+    enemies.forEach(e => e.draw());
+    playerProjectiles.forEach(p => p.draw());
+    explosions.forEach(ex => {
+        ctx.strokeStyle = ex.color; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(ex.x, ex.y, ex.r, 0, Math.PI*2); ctx.stroke();
+        ctx.fillStyle = 'rgba(255,255,255,' + (1 - ex.r/ex.maxR) + ')';
+        ctx.beginPath(); ctx.arc(ex.x, ex.y, ex.r * 0.4, 0, Math.PI*2); ctx.fill();
+    });
+
+    ctx.strokeStyle = '#00ff41'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(mouse.x - 12, mouse.y); ctx.lineTo(mouse.x + 12, mouse.y);
+    ctx.moveTo(mouse.x, mouse.y - 12); ctx.lineTo(mouse.x, mouse.y + 12); ctx.stroke();
+    ctx.beginPath(); ctx.arc(mouse.x, mouse.y, 6, 0, Math.PI*2); ctx.stroke();
+
+    update();
+    requestAnimationFrame(draw);
+}
+
+initCities();
+draw();
+</script>
+</body>
+</html>
